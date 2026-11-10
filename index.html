@@ -562,18 +562,97 @@ function tufo(seed,det=1){ const g=new THREE.IcosahedronGeometry(1,det),p=g.attr
   for(let i=0;i<p.count;i++){const key=[p.getX(i),p.getY(i),p.getZ(i)].map(v=>v.toFixed(3)).join(); if(!(key in cache)) cache[key]=0.82+r()*0.3; const f=cache[key]; p.setXYZ(i,p.getX(i)*f,p.getY(i)*f,p.getZ(i)*f);}
   g.computeVertexNormals(); return g; }
 const cil=(rt,rb,s)=>{const g=new THREE.CylinderGeometry(rt,rb,1,s,1);g.translate(0,.5,0);return g;};
-const folha=(()=>{const g=new THREE.PlaneGeometry(.5,1,1,6);g.translate(0,.5,0);const p=g.attributes.position;for(let i=0;i<p.count;i++){const y=p.getY(i);p.setZ(i,-y*y*0.55);p.setX(i,p.getX(i)*Math.sin(Math.PI*clamp(y,0.02,1))*1.2);}g.computeVertexNormals();return g;})();
+/* ---------- bananeira: geometrias compartilhadas (uma por peça; cada planta só acrescenta instâncias) ---------- */
+const geoCor=(pos,col,idx)=>{ const g=new THREE.BufferGeometry(); g.setAttribute('position',new THREE.Float32BufferAttribute(pos,3)); g.setAttribute('color',new THREE.Float32BufferAttribute(col,3)); if(idx) g.setIndex(idx); g.computeVertexNormals(); return g; };
+const linCor=h=>{ const c=new THREE.Color(h); return [c.r,c.g,c.b]; };
+// folha: comprimento 1. Nasce em pé (eixo +Y), arqueia para +Z e termina com a ponta caída. Pecíolo, limbo largo em calha,
+// nervura central clara e rasgos nas bordas (o limbo é cortado em lóbulos que se afastam e caem um pouco).
+// f0 = inclinação na base, arco = quanto arqueia, queda = quanto a ponta cai (radianos), nr = rasgos por lado.
+function folhaBanana(seed,f0,arco,queda,nr){
+  const r=mulberry(seed), PEC=0.14, HW=0.155, NS=13, NF=64, pos=[], col=[], idx=[];
+  const fi=t=>f0+arco*Math.pow(t,1.2)+queda*Math.pow(clamp((t-.55)/.45,0,1),2), sy=[0], sz=[0];
+  for(let k=1;k<=NF;k++){ const f=fi((k-.5)/NF); sy.push(sy[k-1]+Math.cos(f)/NF); sz.push(sz[k-1]+Math.sin(f)/NF); }
+  const esp=t=>{ const q=clamp(t,0,1)*NF, k=Math.min(NF-1,Math.floor(q)), a=q-k, f=fi(clamp(t,0,1)); return [sy[k]*(1-a)+sy[k+1]*a, sz[k]*(1-a)+sz[k+1]*a, Math.sin(f), -Math.cos(f)]; };   // y, z e a normal da face de cima
+  const larg=s=>HW*Math.pow(Math.min(1,s/0.09),0.55)*(s<0.7?1:Math.sqrt(Math.max(0,1-((s-0.7)/0.3)**2)))*(0.9+0.1*Math.sin(Math.PI*s));
+  const US=[0,0.5,1];
+  for(const sd of [-1,1]){
+    const rasgo={}; let g=0; while(g<nr){ const j=3+Math.floor(r()*(NS-4)); if(rasgo[j]||rasgo[j-1]||rasgo[j+1]) { if(r()<0.2) g++; continue; } rasgo[j]={u0:0.1+r()*0.45, d:0.008+r()*0.011}; g++; }
+    let cai=r()*0.03, ant=-1, fase=r()*6.283;
+    const fila=(j,desl,u0)=>{ const s=1-Math.pow(1-j/NS,1.35), t=PEC+(1-PEC)*s, w=larg(s), n0=pos.length/3;
+      for(const u of US){ const rp=u0==null?0:clamp((u-u0)/(1-u0),0,1), e=esp(t+desl*rp), h=w*u*(0.34*(1-s)-0.32*s*u)-cai*u*u*(0.4+s)+0.010*Math.sin(j*1.9+fase)*u*u;
+        pos.push(sd*u*w, e[0]+e[2]*h, e[1]+e[3]*h); const k=1-0.16*u; col.push(k*(1+0.22*rp), k*(1-0.04*rp), k*(1-0.45*rp)); }   // borda um pouco mais escura; beira do rasgo amarelada
+      return n0; };
+    const liga=(a,b)=>{ for(let c=0;c<US.length-1;c++) idx.push(a+c,b+c,a+c+1, a+c+1,b+c,b+c+1); };
+    for(let j=0;j<=NS;j++){ const R=rasgo[j];
+      if(R){ const a=fila(j,-R.d,R.u0); if(ant>=0) liga(ant,a); cai=r()*0.045; ant=fila(j,R.d,R.u0); }
+      else { const a=fila(j,0,null); if(ant>=0) liga(ant,a); ant=a; } } }
+  // pecíolo e nervura central: prisma de 3 faces, claro, um pouco acima do limbo e saliente por baixo
+  const NM=11; for(let m=0;m<=NM;m++){ const t=m/NM*0.975, e=esp(t), wm=0.021*(1-t)+0.003, hc=0.005, hb=-wm*1.4, c=t<PEC?[1.25,1.3,1.0]:[1.6,1.5,1.05];
+    pos.push(-wm,e[0]+e[2]*hc,e[1]+e[3]*hc, wm,e[0]+e[2]*hc,e[1]+e[3]*hc, 0,e[0]+e[2]*hb,e[1]+e[3]*hb); col.push(...c,...c,c[0]*.8,c[1]*.8,c[2]*.8);
+    if(m){ const b=pos.length/3-3, a=b-3; for(const [p,q] of [[0,1],[1,2],[2,0]]) idx.push(a+p,b+p,a+q, a+q,b+p,b+q); } }
+  return geoCor(pos,col,idx); }
+// pseudocaule: altura 1, base larga, afina para cima e abre um pouco onde saem os pecíolos; bainhas pardas embaixo e verdes em cima
+const estipeBanana=(()=>{ const PR=[[1.14,0],[1.0,.05],[.93,.22],[.84,.46],[.74,.7],[.64,.9],[.72,1]], NR=8, pos=[], col=[], idx=[], r=mulberry(91);
+  PR.forEach(([rad,y],a)=>{ for(let k=0;k<NR;k++){ const th=k/NR*6.2832, m=r(), e=Math.pow(y,0.7), man=(m<0.3&&y<0.75)?0.62:1, v=0.85+0.25*r();
+      pos.push(Math.cos(th)*rad,y,Math.sin(th)*rad); col.push((0.86+0.14*e)*man*v,(0.66+0.42*e)*man*v,(0.52+0.30*e)*man*v);
+      if(a){ const p=(a-1)*NR+k, q=(a-1)*NR+(k+1)%NR; idx.push(p,p+NR,q, q,p+NR,q+NR); } } });
+  return geoCor(pos,col,idx); })();
+// cacho (uma peça): engaço que sai do topo do pseudocaule, arqueia para +Z e desce; ráquis nua e coração roxo na ponta.
+// As pencas são instâncias à parte, presas ao trecho quase vertical (zCacho dá o afastamento do eixo em cada altura).
+const CACHO_Y0=-0.17, CACHO_DY=0.09, CACHO_FIM=-1.10, zCacho=y=>0.50+0.05*clamp((-y-0.1)/0.8,0,1.2);
+const cachoBanana=(()=>{ const pts=[[0,-.12,0],[0,.10,.04],[0,.21,.20],[0,.14,.40],[0,-.10,.50],[0,-.50,.525],[0,-.95,.55],[0,CACHO_FIM,.556]].map(p=>new THREE.Vector3(...p));
+  const pinta=(g,fn)=>{ const p=g.attributes.position, c=[]; for(let i=0;i<p.count;i++) c.push(...fn(p.getY(i))); g.setAttribute('color',new THREE.Float32BufferAttribute(c,3)); return g.toNonIndexed(); };
+  const ve=linCor('#7d8f3a'), ro=linCor('#6a2148'), ro2=linCor('#8a3358');
+  const tubo=pinta(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts),18,0.026,6,false),()=>ve);
+  const cor=new THREE.LatheGeometry([[0.001,0.01],[.05,-.03],[.078,-.10],[.062,-.19],[.026,-.26],[0.001,-.29]].map(p=>new THREE.Vector2(...p)),7); cor.translate(0,CACHO_FIM,.556);
+  const cora=pinta(cor,y=>{ const a=clamp((CACHO_FIM-y)/0.29,0,1); return ro.map((v,k)=>v*(1-a)+ro2[k]*a); });
+  const g=new THREE.BufferGeometry(); for(const n of ['position','normal','color']) g.setAttribute(n,new THREE.Float32BufferAttribute([...tubo.attributes[n].array,...cora.attributes[n].array],3)); return g; })();
+// penca: roda de bananas individuais em volta da ráquis (eixo Y), em duas fileiras alternadas; cada banana sai para fora e curva para cima
+function pencaBanana(nb){ const pos=[], col=[], idx=[], NL=5, SS=[0,.18,.48,.8,.94,1], RR=[.008,.018,.0245,.0235,.0125,.0045], r=mulberry(57);
+  for(let b=0;b<nb;b++){ const par=b%2, th=(b+(r()-.5)*.35)/nb*6.2832, ct=Math.cos(th), st=Math.sin(th), L=(par?0.175:0.19)*(0.93+r()*0.14), a0=par?-0.45:-0.12, a1=par?1.15:1.32;
+    let ro=0.028, y=par?-0.012:0.012, sa=0; const n0=pos.length/3;
+    SS.forEach((s,k)=>{ const N=6; for(let q=0;q<N;q++){ const sm=sa+(s-sa)*(q+.5)/N, a=a0+(a1-a0)*sm; ro+=Math.cos(a)*(s-sa)*L/N; y+=Math.sin(a)*(s-sa)*L/N; } sa=s;
+      const a=a0+(a1-a0)*s, n1r=-Math.sin(a), n1y=Math.cos(a), cc=s<0.1?[.62,.72,.42]:(s>0.97?[.22,.17,.09]:(s>0.9?[.7,.7,.4]:[1,1,1]));
+      for(let q=0;q<NL;q++){ const ps=q/NL*6.2832, c=Math.cos(ps)*RR[k], t=Math.sin(ps)*RR[k], rr=ro+n1r*c; pos.push(ct*rr-st*t, y+n1y*c, st*rr+ct*t); col.push(...cc);
+        if(k){ const p=n0+(k-1)*NL+q, p2=n0+(k-1)*NL+(q+1)%NL; idx.push(p,p+NL,p2, p2,p+NL,p2+NL); } } }); }
+  return geoCor(pos,col,idx); }
 const mat=(o={})=>new THREE.MeshStandardMaterial({color:'#ffffff',roughness:.85,metalness:0,...o});
 const POOL={};
 function pool(nome,geo,material,max,sombra=true){ const m=new THREE.InstancedMesh(geo,material,Math.max(1,max)); m.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
   m.instanceColor=new THREE.InstancedBufferAttribute(new Float32Array(Math.max(1,max)*3),3); m.instanceColor.setUsage(THREE.DynamicDrawUsage); m.castShadow=sombra; m.receiveShadow=true; m.count=0; m.frustumCulled=false; scene.add(m); POOL[nome]={m,n:0,M:m.instanceMatrix.array,Cc:m.instanceColor.array,max:Math.max(1,max)}; }
 const nG=[0,0,0]; for(const d of DES){ const g=[0,0,0]; for(const p of DD[d.id].PLT) g[p[2]]++; g.forEach((v,k)=>nG[k]=Math.max(nG[k],v)); }   // peças para o maior dos dois desenhos
 const nT=nG[0], nB=nG[1], nC=nG[2];
+/* ---------- cafeeiro: geometrias compartilhadas ---------- */
+// ramo lateral (plagiotrópico): comprimento 1 ao longo de +Z, levemente arqueado, com pares de folhas elípticas dobradas na nervura e de ponta caída. Os ramos não projetam sombra (o miolo projeta): metade do custo
+const CAFE_NOS=[.22,.4,.58,.76,.93], cafeEixo=z=>0.10*z-0.24*z*z;
+function ramoCafe(seed){ const r=mulberry(seed), pos=[], col=[], idx=[];
+  for(let k=0;k<=4;k++){ const z=k/4, y=cafeEixo(z), w=0.02*(1-0.6*z); pos.push(-w,y,z, w,y,z, 0,y+w*1.5,z); for(let j=0;j<3;j++) col.push(.8,.5,.3);
+    if(k){ const b=k*3, a=b-3; for(const [p,q] of [[0,1],[1,2],[2,0]]) idx.push(a+p,b+p,a+q, a+q,b+p,b+q); } }
+  CAFE_NOS.forEach((z,n)=>{ for(const sd of [-1,1]){ const len=(0.36-0.025*n)*(0.85+0.3*r()), an=0.8+r()*0.5, dx=Math.sin(an)*sd, dz=Math.cos(an), dy=(r()-.4)*0.3, y=cafeEixo(z), wd=len*0.23, cai=(0.18+0.2*r())*len, k=0.85+0.3*r(), b=pos.length/3;
+      const pt=(f,w,h)=>pos.push(dx*len*f+dz*wd*w, y+dy*len*f+h*len, z+dz*len*f-dx*wd*w);   // f ao longo da folha, w para o lado, h para cima
+      pt(0,0,0.03); pt(0.5,0,0.07); pt(1,0,-cai/len); pt(0.28,0.85,0); pt(0.66,0.9,-0.04); pt(0.28,-0.85,0); pt(0.66,-0.9,-0.04);   // base, meio da nervura (mais alto), ponta caída, 2 pontos de cada borda
+      col.push(1.25*k,1.3*k,1.05*k, 1.25*k,1.3*k,1.05*k, .85*k,.85*k,.8*k, k,k,k, .95*k,.95*k,.95*k, k,k,k, .95*k,.95*k,.95*k);
+      idx.push(b,b+3,b+1, b+3,b+4,b+1, b+4,b+2,b+1, b,b+1,b+5, b+5,b+1,b+6, b+6,b+1,b+2); } });
+  return geoCor(pos,col,idx); }
+// frutos: rosetas de 3 bagas coladas ao ramo nos mesmos nós das folhas (a instância usa a mesma matriz do ramo)
+const frutosCafe=(()=>{ const r=mulberry(77), pos=[], col=[], idx=[], R=0.042;
+  CAFE_NOS.slice(1,4).forEach(z=>{ for(let q=0;q<3;q++){ const a=q*2.1+r()*0.8, cx=Math.cos(a)*0.045, cy=cafeEixo(z)+Math.sin(a)*0.04-0.005, cz=z+(r()-.5)*0.07, b=pos.length/3, rr=R*(0.85+0.3*r());
+      pos.push(cx+rr,cy,cz, cx-rr,cy,cz, cx,cy+rr,cz, cx,cy-rr,cz, cx,cy,cz+rr, cx,cy,cz-rr); for(let j=0;j<6;j++) col.push(1,1,1);
+      for(const [i,j,k] of [[0,2,4],[2,1,4],[1,3,4],[3,0,4],[2,0,5],[1,2,5],[3,1,5],[0,3,5]]) idx.push(b+i,b+j,b+k); } });
+  return geoCor(pos,col,idx); })();
+const CAFE_R=TOQUE?6:12, CAFE_FR=TOQUE?3:5;   // ramos e ramos com fruto por planta
+pool('ramoA',ramoCafe(301),mat({side:THREE.DoubleSide,vertexColors:true,roughness:.6}),nC*CAFE_R/2,false); pool('ramoB',ramoCafe(402),mat({side:THREE.DoubleSide,vertexColors:true,roughness:.6}),nC*CAFE_R/2,false);
+pool('cafeFr',frutosCafe,mat({vertexColors:true,roughness:.45}),nC*CAFE_FR,false);
 pool('cafeA',tufo(11,1),mat(),nC,!TOQUE); pool('cafeB',tufo(23,1),mat(),nC,!TOQUE); pool('cafeT',cil(.7,1,5),mat(),nC,false);
 pool('fruto',new THREE.IcosahedronGeometry(1,0),mat({roughness:.5}),nC*4+nT*16+10,false);
 pool('tronco',cil(.7,1,7),mat(),nT+5); pool('galho',cil(.6,1,5),mat(),nT*4+10);
 pool('tufoA',tufo(31,TOQUE?1:2),mat(),nT*9+10); pool('tufoB',tufo(47,TOQUE?1:2),mat(),nT*9+10);
-pool('estipe',cil(.8,1,7),mat(),nB+2); pool('folha',folha,mat({side:THREE.DoubleSide}),nB*7+7); pool('cacho',cil(.45,.25,6),mat(),nB+2);
+// bananeira, por touceira: até 3 pseudocaules (mãe e 2 filhotes), até 21 folhas divididas em duas formas, 1 cacho e até 7 pencas
+const BAN_F=TOQUE?7:10, BAN_FILHOS=TOQUE?1:2, BAN_PENCA=TOQUE?6:8;
+pool('estipe',estipeBanana,mat({vertexColors:true}),nB*3+3,!TOQUE);
+pool('folha',folhaBanana(101,0.12,0.85,0.80,2),mat({side:THREE.DoubleSide,vertexColors:true,roughness:.7}),nB*14+14,!TOQUE);    // folha nova: mais em pé
+pool('folhaB',folhaBanana(202,0.30,1.10,0.90,4),mat({side:THREE.DoubleSide,vertexColors:true,roughness:.7}),nB*12+12,!TOQUE);  // folha velha: mais aberta, caída e rasgada
+pool('cacho',cachoBanana,mat({side:THREE.DoubleSide,vertexColors:true}),nB+2,!TOQUE); pool('penca',pencaBanana(BAN_PENCA),mat({vertexColors:true,roughness:.55}),nB*7+7,false);
 const CC=new THREE.Color();
 function poeR(p,X,Y,Z,sx,sy,sz,ry,r,g,b){ if(p.n>=p.max) return; const c=Math.cos(ry),s=Math.sin(ry),M=p.M,o=p.n*16;
   M[o]=c*sx;M[o+1]=0;M[o+2]=-s*sx;M[o+3]=0; M[o+4]=0;M[o+5]=sy;M[o+6]=0;M[o+7]=0; M[o+8]=s*sz;M[o+9]=0;M[o+10]=c*sz;M[o+11]=0; M[o+12]=X;M[o+13]=Y;M[o+14]=Z;M[o+15]=1;
@@ -770,6 +849,36 @@ function desenharArvore(i,x,y,z,H,R,F,fruta){
   for(let q=0;q<n;q++){ const u=r()*2-1, th=r()*6.283, s=Math.sqrt(1-u*u)*0.6, p=base.clone(); p.x+=Math.cos(th)*s*R; p.z+=Math.sin(th)*s*R; p.y+=cy+u*ry*0.55;
     const sz=0.42+r()*0.2; poe(q%2?'tufoA':'tufoB',p,R*sz,ry*0.55*(0.8+r()*.4),R*sz,modoCor==='nat'?varia(c,i*17+q):c,0,r()*6,0); }
   if(fruta&&F>0){ for(let q=0;q<F*5;q++){ const u=r()*1.2-.7, th=r()*6.283, s=Math.sqrt(1-Math.min(1,u*u))*0.95, p=base.clone(); p.x+=Math.cos(th)*s*R; p.z+=Math.sin(th)*s*R; p.y+=cy+u*ry*0.6; poe('fruto',p,0.08,0.1,0.08,'#e0a030'); } } }
+/* bananeira (touceira): pseudocaule com leve inclinação, folhas em espiral (as novas em pé no centro, as velhas abertas e caídas),
+   filhotes, folhas secas pendentes e, quando o indicador de frutificação do modelo (F>0) diz que a planta produz, cacho com pencas e coração.
+   O número de pencas acompanha o nível de F (1 a 3); não há estágio de maturação. Tudo é sorteado pela semente da planta: não pisca ao passar os anos. */
+const EU=new THREE.Euler(0,0,0,'YXZ'), rnd=(a,b)=>{ const s=Math.sin(a*12.9898+b*78.233)*43758.5453; return s-Math.floor(s); };
+function poeYX(p,x,y,z,sx,sy,sz,rx,ry,rz,r,g,b){ if(p.n>=p.max) return; O.position.set(x,y,z); EU.set(rx,ry,rz); O.quaternion.setFromEuler(EU); O.scale.set(sx,sy,sz); O.updateMatrix(); O.matrix.toArray(p.M,p.n*16);
+  const q=p.n*3; p.Cc[q]=r; p.Cc[q+1]=g; p.Cc[q+2]=b; p.n++; }
+const C_EST=linCor('#8f9b55'), C_SECA=linCor('#a58a58'), C_BAN=linCor('#b6cc4a');
+function pseudocaule(sd,bx,by,bz,hs,L,nf,azL,inc,azC,cr,cg,cb,nat,secas,F){
+  const rt=0.03+0.036*hs, ax=Math.sin(inc)*Math.sin(azL), ay=Math.cos(inc), az0=Math.sin(inc)*Math.cos(azL), tx=bx+ax*hs, ty=by+ay*hs, tz=bz+az0*hs, ke=nat?0.88+0.24*rnd(sd,2):1;
+  poeYX(POOL.estipe,bx,by,bz,rt,hs,rt,inc,azL,0,C_EST[0]*ke,C_EST[1]*ke,C_EST[2]*ke);
+  const a0=rnd(sd,1)*6.2832, desvia=a=>{ if(azC==null) return a; const d=((a-azC)%6.2832+9.4248)%6.2832-3.1416; return Math.abs(d)<0.5?a+(d<0?-1:1)*(0.6-Math.abs(d)):a; };
+  for(let q=0;q<nf;q++){ const u=nf>1?q/(nf-1):0, velha=u>0.5; let az=a0+q*2.39996+(rnd(sd,q+7)-.5)*0.5; if(u>0.3) az=desvia(az);
+    const rx=(velha?0.15+(u-.5):-0.05+0.9*u)+(rnd(sd,q+31)-.5)*0.16, Lq=L*(0.82+0.3*rnd(sd,q+53))*(q?1:0.8), wx=0.9+0.25*rnd(sd,q+61), d=q*0.012*hs, o=rt*0.3;
+    const k=nat?0.86+0.26*rnd(sd,q+71):1, am=nat?u:0;
+    poeYX(velha?POOL.folhaB:POOL.folha,tx-ax*d+Math.sin(az)*o,ty-ay*d,tz-az0*d+Math.cos(az)*o,Lq*wx,Lq,Lq,rx,az,(rnd(sd,q+83)-.5)*0.3,cr*k*(1+0.22*am),cg*k,cb*k*(1-0.25*am)); }
+  for(let s=0;s<secas;s++){ const az=desvia(a0+2.1+s*2.7+rnd(sd,s+91)), Lq=L*(0.55+0.15*rnd(sd,s+93)), d=0.07*hs, k=0.8+0.3*rnd(sd,s+95);   // folha seca pendurada junto ao pseudocaule
+    poeYX(POOL.folha,tx-ax*d+Math.sin(az)*rt*.6,ty-ay*d,tz-az0*d+Math.cos(az)*rt*.6,Lq*0.42,Lq,Lq,1.05+0.2*rnd(sd,s+97),az,(rnd(sd,s+99)-.5)*0.4,C_SECA[0]*k,C_SECA[1]*k,C_SECA[2]*k); }
+  if(azC!=null){ const sB=Math.min(1,hs/1.75), sA=Math.sin(azC), cA=Math.cos(azC), kc=0.9+0.2*rnd(sd,101), np=Math.min(7,4+F);
+    poeYX(POOL.cacho,tx,ty,tz,sB,sB,sB,0,azC,0,kc,kc,kc);
+    for(let h=0;h<np;h++){ const yl=CACHO_Y0-h*CACHO_DY, zl=zCacho(yl)*sB, sh=sB*(1.08-0.06*h)*(0.95+0.1*rnd(sd,h+111)), k=0.9+0.2*rnd(sd,h+121);
+      poeYX(POOL.penca,tx+sA*zl,ty+yl*sB,tz+cA*zl,sh,sh,sh,(rnd(sd,h+131)-.5)*0.18,rnd(sd,h+141)*6.2832,(rnd(sd,h+151)-.5)*0.18,C_BAN[0]*k,C_BAN[1]*k,C_BAN[2]*k); } } }
+function desenharBananeira(i,x,y,z,H,R,F){
+  const X=x-W/2, Z=-(y-HH/2), Y=z-0.05, hs=H*(0.62+0.26*clamp((H-0.5)/1.5,0,1)), L=clamp(1.35*R,0.6*H,0.8*H), nat=modoCor==='nat', nf=clamp(Math.round(3+hs*2.6),4,BAN_F);
+  CC.set(cor(i)); const cr=CC.r, cg=CC.g, cb=CC.b;
+  // cacho virado para a entrelinha (perpendicular à orientação média das linhas), de um lado ou do outro: fica à vista em "Entre as linhas"
+  const lado=rnd(i,3)<0.5?1:-1, azE=Math.atan2(DP[0]*lado,-DP[1]*lado)+(rnd(i,4)-.5)*0.7, azC=F>0?azE:null;
+  pseudocaule(i*3+1,X,Y,Z,hs,L,nf,F>0?azE:rnd(i,6)*6.2832,0.02+0.05*rnd(i,5),azC,cr,cg,cb,nat,nat&&hs>1.6?1+(rnd(i,8)<0.3?1:0):0,F);
+  for(let k=0;k<BAN_FILHOS;k++){ const fk=clamp((H-(1.1+0.9*k))/0.8,0,1); if(fk<=0) continue;   // filhotes: surgem quando a mãe cresce, do lado oposto ao cacho
+    const an=azE+Math.PI*(0.62+0.76*k)+(rnd(i,20+k)-.5)*0.8, dist=0.30+0.16*rnd(i,22+k), hk=hs*(0.5-0.17*k)*(0.35+0.65*fk)*(0.85+0.3*rnd(i,24+k));
+    pseudocaule(i*3+2+k,X+Math.sin(an)*dist,Y,Z+Math.cos(an)*dist,hk,L*hk/hs*1.3,clamp(Math.round(2+hk*2.6),3,5-k),an,0.06+0.06*rnd(i,26+k),null,cr,cg,cb,nat,0,0); } }
 function construir(){
   const c=CEN[cen], A=AR[c.id], t=ano, y0=Math.floor(t), y1=Math.min(ANOS,y0+1), f=t-y0, yi=Math.round(t);
   for(const k in POOL) POOL[k].n=0;
@@ -778,18 +887,16 @@ function construir(){
     const H=(A.H[y0*NP+i]*(1-f)+A.H[y1*NP+i]*f)/10, R=(A.R[y0*NP+i]*(1-f)+A.R[y1*NP+i]*f)/20, F=A.F[yi*NP+i], g=PLT[i][2];
     const x=PLT[i][0], y=PLT[i][1], z=PZ[i];
     if(g===0){ desenharArvore(i,x,y,z,H,Math.max(R,0.2),0,false); continue; }
-    if(g===1){ // bananeira: estipe e folhas na escala da altura
-      const s=clamp(H/3.5,0.15,1.2), base=P(x,y,z-0.05), r=mulberry(i*5+2), hs=H*0.62, cc=cor(i);
-      poe('estipe',base,0.13*s,hs,0.13*s,'#6f7f3a');
-      for(let q=0;q<6;q++){ const top=base.clone(); top.y+=hs*0.96; poe('folha',top,1.1*s,1.9*s,1.1*s,modoCor==='nat'?varia(cc,i*9+q,.1):cc,-0.35-r()*0.5,q/6*6.283+r()*.4,0); }
-      if(F>0){ const p=base.clone(); p.y+=hs*0.75; p.x+=0.18; poe('cacho',p,0.16,0.42,0.16,'#9fae3c',Math.PI,0,0); }
-      continue; }
-    // café
-    const X=x-W/2, Z=-(y-HH/2), yb=z-0.05, ro=ROT[i]; CC.set(cor(i)); const rr=CC.r, gg=CC.g, bb=CC.b; const Rc=Math.max(R,0.12);
-    poeR(POOL.cafeT,X,yb,Z,0.04,H*0.3,0.04,0,.35,.27,.2);
-    poeR(POOL.cafeA,X,yb+H*0.4,Z,Rc,H*0.32,Rc*0.85,ro,rr,gg,bb);
-    poeR(POOL.cafeB,X,yb+H*0.74,Z,Rc*0.62,H*0.24,Rc*0.55,ro+1,rr*1.05,gg*1.05,bb*1.05);
-    if(F>0){ const rq=mulberry(i*3+1); for(let q=0;q<Math.min(TOQUE?2:4,F+1);q++){ const a=rq()*6.283, hh=0.3+rq()*0.4, rad=Rc*0.9*(1-hh*0.3); poeR(POOL.fruto,X+Math.cos(a)*rad,yb+H*hh,Z+Math.sin(a)*rad,0.07,0.07,0.07,0,CVERM.r,CVERM.g,CVERM.b); } }
+    if(g===1){ desenharBananeira(i,x,y,z,H,Math.max(R,0.1),F); continue; }
+    // café: tronco, miolo escuro (dá volume) e ramos laterais com folhas em espiral, do mais comprido embaixo ao mais curto no topo; tudo na escala de H e R do modelo
+    const X=x-W/2, Z=-(y-HH/2), yb=z-0.05, ro=ROT[i], nat=modoCor==='nat'; CC.set(cor(i)); const kp=nat?0.9+0.2*rnd(i,1):1, rr=CC.r*kp, gg=CC.g*kp, bb=CC.b*kp; const Rc=Math.max(R,0.12);
+    poeR(POOL.cafeT,X,yb,Z,0.03+0.008*H,H*0.9,0.03+0.008*H,0,.35,.27,.2);
+    poeR(POOL.cafeA,X,yb+H*0.42,Z,Rc*0.48,H*0.3,Rc*0.44,ro,rr*.5,gg*.5,bb*.5);
+    poeR(POOL.cafeB,X,yb+H*0.76,Z,Rc*0.32,H*0.2,Rc*0.3,ro+1,rr*.55,gg*.55,bb*.55);
+    const nfr=F>0?Math.min(CAFE_FR,F+2):0;
+    for(let q=0;q<CAFE_R;q++){ const u=(q+0.5)/CAFE_R, hh=0.14+0.8*u+(rnd(i,q+3)-.5)*0.04, len=Rc*(1.12-0.62*Math.pow(u,1.4))*(0.88+0.24*rnd(i,q+10)), az=ro+q*2.39996+(rnd(i,q+20)-.5)*0.5, k=(nat?0.85+0.3*rnd(i,q+30):1)*1.15;
+      poeR(q%2?POOL.ramoA:POOL.ramoB,X,yb+H*hh,Z,len,len,len,az,rr*k,gg*k,bb*k);
+      if((q%2)&&(q>>1)<nfr) poeR(POOL.cafeFr,X,yb+H*hh,Z,len,len,len,az,CVERM.r,CVERM.g,CVERM.b); }   // frutos junto aos ramos; quantos ramos frutificam acompanha o nível de F
   }
   for(const k in POOL){ const p=POOL[k]; p.m.count=p.n; p.m.instanceMatrix.needsUpdate=true; p.m.instanceColor.needsUpdate=true; }
   sujo=true; }
@@ -1072,7 +1179,7 @@ function textos(){
   $('rodape').textContent=`Protótipo Cardeal Map · levantamento por drone · ${CFG.crs} · motor 3D three.js (MIT) · estimativa de modelagem, sem validação de campo`;
 }
 camadasDesenho(); premPreenche(); premTabelas(); textos(); legenda(); taille(); vue('geral'); ano=ANO_INI; construir(); maj(); requestAnimationFrame(boucle);
-window.__app={construir,get AR(){return AR},IND,CEN,DES,DD,setDesenho,get des(){return des},ECOD:()=>ECOD,ECO:()=>ECO,renderer,POOL,camera,grpDren,grpQV,grpEst,mRede,mCond,THREE,get ano(){return ano},set ano(v){ano=v}};
+window.__app={construir,get AR(){return AR},IND,CEN,DES,DD,setDesenho,get des(){return des},ECOD:()=>ECOD,ECO:()=>ECO,renderer,POOL,camera,controls,grpDren,grpQV,grpEst,mRede,mCond,THREE,get ano(){return ano},set ano(v){ano=v}};
 </script>
 </body>
 </html>
